@@ -1,0 +1,131 @@
+# seatwave-files (Module 29): an S3-compatible object store of four nodes with one drive each, and
+# PostgreSQL for the stored_objects table, under the Compose project name seatwave-files.
+#
+# The store is RustFS 1.0.5 (Apache-2.0), chosen on 12 November 2026 among maintained S3-compatible
+# servers (docs/store-choice.md). The lab first planned MinIO's community edition, which was found
+# on 11 November 2026 to be source-only and archived. Images are pinned by tag and digest, checked
+# on Docker Hub on 12 November 2026, each with an arm64 variant: rustfs/rustfs:1.0.5 (the project's
+# own image) and the Docker Official Image postgres:18.6.
+#
+# Why four nodes and not one node with four drives: RustFS refuses to build an erasure set from
+# folders on one physical device (four Docker volumes all live on the virtual machine's one disk),
+# and the switch that skips that check is for testing only. Four nodes, one volume each, is a set
+# it accepts, and losing a node with its volume is the failure the drill rehearses. The four volumes
+# still share one disk, so this proves the mechanism, not independence of failures.
+#
+# Nothing runs privileged, nothing uses the host network or the Docker socket; ports are on
+# 127.0.0.1 only, from Module 29's range 22900 to 22999. Credentials are files generated at run time
+# into .secrets/ by scripts/stack.sh up and removed by scripts/stack.sh down.
+name: seatwave-files
+
+x-store-node: &store-node
+  image: rustfs/rustfs:1.0.5@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
+  environment:
+    # Four nodes, one drive each: one erasure set of 4. The default parity for a set of 4 is 2
+    # ("EC Parity: 2" in rc admin info cluster), so each object is 2 data and 2 parity shards.
+    RUSTFS_VOLUMES: "http://node{1...4}:9000/data"
+    RUSTFS_ADDRESS: "0.0.0.0:9000"
+    # The web console is not needed by the lab and stays off.
+    RUSTFS_CONSOLE_ENABLE: "false"
+    RUSTFS_ACCESS_KEY_FILE: /run/secrets/store_access_key
+    RUSTFS_SECRET_KEY_FILE: /run/secrets/store_secret_key
+    RUSTFS_OBS_LOGGER_LEVEL: warn
+  secrets:
+    - store_access_key
+    - store_secret_key
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /logs
+    - /tmp
+  # The Docker virtual machine is shared with other projects: 384 MB and 2 CPUs a node.
+  cpus: 2
+  mem_limit: 384m
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+
+services:
+  node1:
+    <<: *store-node
+    hostname: node1
+    volumes:
+      - drive1:/data
+    ports:
+      - "127.0.0.1:22900:9000"
+  node2:
+    <<: *store-node
+    hostname: node2
+    volumes:
+      - drive2:/data
+  node3:
+    <<: *store-node
+    hostname: node3
+    volumes:
+      - drive3:/data
+  node4:
+    <<: *store-node
+    hostname: node4
+    volumes:
+      - drive4:/data
+
+  postgres:
+    image: postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: seatwave
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+      - owner_password
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # The entrypoint starts as root to own the data folder, then runs PostgreSQL as its own user.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cpus: 2
+    mem_limit: 512m
+    tmpfs:
+      - /var/run/postgresql
+      - /tmp
+    volumes:
+      - pgdata:/var/lib/postgresql
+      # Runs once, when the data volume is new: the owner role, then db/V1__stored_objects.sql as it.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db/V1__stored_objects.sql:/seatwave/V1__stored_objects.sql:ro
+    ports:
+      - "127.0.0.1:22920:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "seatwave"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+secrets:
+  store_access_key:
+    file: ./.secrets/store-access-key
+  store_secret_key:
+    file: ./.secrets/store-secret-key
+  postgres_password:
+    file: ./.secrets/postgres.password
+  owner_password:
+    file: ./.secrets/owner.password
+
+volumes:
+  drive1:
+  drive2:
+  drive3:
+  drive4:
+  pgdata:

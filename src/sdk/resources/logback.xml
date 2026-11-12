@@ -1,0 +1,12 @@
+<configuration>
+  <!-- The programs print their results themselves; the SDK and the driver speak only to warn. -->
+  <appender name="err" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder>
+      <pattern>%level %logger{20}: %msg%n</pattern>
+    </encoder>
+  </appender>
+  <root level="WARN">
+    <appender-ref ref="err"/>
+  </root>
+</configuration>

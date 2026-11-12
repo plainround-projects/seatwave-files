@@ -1,0 +1,22 @@
+{
+  "Rules": [
+    {
+      "ID": "incoming-uploads-expire-after-7-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "incoming/" },
+      "Expiration": { "Days": 7 }
+    },
+    {
+      "ID": "abort-incomplete-multipart-after-7-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "posters-to-infrequent-access-after-90-days",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "posters/" },
+      "Transitions": [ { "Days": 90, "StorageClass": "STANDARD_IA" } ]
+    }
+  ]
+}
